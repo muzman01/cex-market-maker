@@ -1,20 +1,22 @@
-import { SPREAD } from "./config";
+import { SPREAD, MIN_ORDER_SIZE } from "./config"; // SPREAD ve MIN_ORDER_SIZE, konfigürasyondan alınır
 
 interface Order {
-  price: number;
-  amount: number;
+  ordType: string; // 'LIMIT' veya 'MARKET' olabilir
+  price: number; // Fiyat
+  sz: number; // Miktar
+  _id?: string; // Sipariş ID'si, opsiyonel
 }
 
 interface OrderBook {
-  bids: Order[];
-  asks: Order[];
+  buyBook: Order[];
+  sellBook: Order[];
 }
 
 export class OrderBookManager {
   private orderBook: OrderBook;
 
   constructor() {
-    this.orderBook = { bids: [], asks: [] };
+    this.orderBook = { buyBook: [], sellBook: [] };
   }
 
   updateOrderBook(newOrderBook: OrderBook): void {
@@ -22,19 +24,61 @@ export class OrderBookManager {
   }
 
   getBestBid(): Order | undefined {
-    return this.orderBook.bids[0];
+    return this.orderBook.buyBook
+      .filter((order) => order.sz >= MIN_ORDER_SIZE)
+      .reduce((bestBid, currentOrder) => {
+        return !bestBid || currentOrder.price > bestBid.price
+          ? currentOrder
+          : bestBid;
+      }, undefined as Order | undefined);
   }
 
   getBestAsk(): Order | undefined {
-    return this.orderBook.asks[0];
+    return this.orderBook.sellBook
+      .filter((order) => order.sz >= MIN_ORDER_SIZE)
+      .reduce((bestAsk, currentOrder) => {
+        return !bestAsk || currentOrder.price < bestAsk.price
+          ? currentOrder
+          : bestAsk;
+      }, undefined as Order | undefined);
   }
 
-  isSpreadAcceptable(): boolean {
+  // En az bir kitap doluysa emir açacak olan fonksiyon
+  placeOrder(): void {
     const bestBid = this.getBestBid();
     const bestAsk = this.getBestAsk();
-    if (!bestBid || !bestAsk) return false;
 
-    const spread = (bestAsk.price - bestBid.price) / bestAsk.price;
-    return spread > SPREAD;
+    // Eğer buyBook veya sellBook'ta en az bir emir varsa emir açılacak
+    if (bestBid || bestAsk) {
+      let orderPrice: number;
+      let orderSize: number;
+
+      if (bestBid && bestAsk) {
+        // Hem buyBook hem de sellBook doluysa, orta bir fiyat belirle
+        orderPrice = (bestBid.price + bestAsk.price) / 2;
+        orderSize = Math.min(bestBid.sz, bestAsk.sz);
+      } else if (bestBid) {
+        // Sadece buyBook doluysa, buyBook'taki en iyi alış fiyatına yakın bir fiyat belirle
+        orderPrice = bestBid.price + 0.01; // Biraz yüksek fiyatla
+        orderSize = bestBid.sz; // En iyi alış emrinin miktarı
+      } else if (bestAsk) {
+        // Sadece sellBook doluysa, sellBook'taki en iyi satış fiyatına yakın bir fiyat belirle
+        orderPrice = bestAsk.price - 0.01; // Biraz düşük fiyatla
+        orderSize = bestAsk.sz; // En iyi satış emrinin miktarı
+      } else {
+        // Eğer ne buyBook ne de sellBook doluysa (oldukça nadir bir durum), işlem yapılmayacak
+        console.log("Eşleştirilebilecek uygun emir bulunamadı.");
+        return;
+      }
+
+      console.log(
+        `Yeni order açılıyor: Fiyat = ${orderPrice.toFixed(
+          2
+        )}, Miktar = ${orderSize.toFixed(2)}`
+      );
+      // Burada API çağrısı veya başka bir işlemle emir açabilirsiniz.
+    } else {
+      console.log("Eşleştirilebilecek uygun emir bulunamadı.");
+    }
   }
 }
